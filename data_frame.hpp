@@ -9,197 +9,40 @@
  * 
  */
 
-#ifndef _UTILITY_DATA_FRAME_HPP_
-#define _UTILITY_DATA_FRAME_HPP_
+#ifndef UTILITY_DATA_FRAME_HPP
+#define UTILITY_DATA_FRAME_HPP
 
 #include <vector>               // std::vector
+#include <cstdlib>              // std::strtol, std::strtod
 #include <string>               // std::string, std::getline
 #include <fstream>              // std::ifstream, std::ofstream
-#include <sstream>              // std::sstream, std::istringstream
+#include <sstream>              // std::sstream
 #include <stdexcept>            // std::runtime_error, std::out_of_range
 #include <iostream>             // std::cout, std::endl
 #include <algorithm>            // std::find
-#include <initializer_list>     // std::initilizer_list
-#include <utility>              // std::tuple
-#include <unordered_map>
+#include <unordered_map>        // std::unordered_map
+#include <memory>               // std::shared_ptr
+#include <tuple>                // std:::tuple
+#include <numeric>              // std::iota
+#include <functional>           // std::function
 
-/**
- * @class DataFrame
- * @brief Pythonにおける表形式データハンドリング用ライブラリPandasの代替ライブラリ
- * @note 本家リンクは下記参照のこと
- * @n @link
- * https://pandas.pydata.org/pandas-docs/stable/reference/index.html
- * @endlink
- * @n 現状は Factory Method @ref read_csv からのみインスタンス化可能にしてCSVデータ読込にのみ特化させている。
- * @n 本家と異なり各列の型情報を保持するようにはしていない。各行をtuple化したvectorコンテナとする実装も考えたが、現状は対応させていない。
- * @n また、基本的には静的データの解析に用いることを前提で本クラスは作成しており、全行データをDataFrameとして取り込んだ後、
- * @n 加工して使用することを想定している。高速な読取処理については今後も本クラスで対応する予定はないため要望に応じて別クラスを作成する。
- *
- */
 class DataFrame final
 {
 
 public:
-    enum Axis
-    { 
-        COLUMN, 
-        ROW    
-    };
 
-    enum ReadCsvArgument
-    {
-        HEADER,
-        SEPARATOR,
-        NEW_LINE,
-        AUTO_TRIM
-    };
-
-    class DynamicType
-    {
-    private:
-        enum struct Kind { BOOLEAN, NUMBER, STRING };
-
-        union Data
-        {
-            bool boolean;
-            double number;
-            std::string str;
-            Data() : boolean() {}
-            ~Data() {}
-        };
-
-        Kind kind_;
-        Data data_;
-
-        template<typename T>
-        void destroy(T* t)
-        {
-            t->~T();
-        }
-
-        template<class T, class = void>
-        struct DynamicAs
-        {
-            static T as(const DynamicType& value)
-            {
-                T result;
-                std::stringstream ss;
-                if(value.kind_ == Kind::BOOLEAN)
-                    ss << value.data_.boolean;
-                else if(value.kind_ == Kind::NUMBER)
-                    ss << value.data_.number;
-                ss >> result;
-                return result;
-            }
-        };
-
-        template<class V>
-        struct DynamicAs<std::string, V>
-        {
-            static std::string as(const DynamicType& value)
-            {
-                return value.data_.str;
-            }
-        };
-
-    public:
-        DynamicType()
-        : kind_()
-        {}
-
-        DynamicType(const DynamicType& other)
-        : kind_(other.kind_)
-        {
-            if(kind_ == Kind::BOOLEAN)
-                data_.boolean = other.data_.boolean;
-            else if(kind_ == Kind::NUMBER)
-                data_.number = other.data_.number;
-            else if(kind_ == Kind::STRING)
-                new(&data_.str) std::string(other.data_.str);
-        }
-
-        DynamicType(const bool& value)
-        : kind_(Kind::BOOLEAN)
-        {
-            data_.boolean = value;
-        }
-
-        DynamicType(const double& value)
-        : kind_(Kind::NUMBER)
-        {
-            data_.number = value;
-        }
-
-        DynamicType(const char* value)
-        : kind_(Kind::STRING)
-        {
-            new(&data_.str) std::string(value);
-        }
-
-        DynamicType(const std::string& value)
-        : kind_(Kind::STRING)
-        {
-            new(&data_.str) std::string(value);
-        }
-
-        template<typename T>
-        T as() const
-        {
-            return DynamicAs<T>::as(*this);
-        }
-
-        ~DynamicType()
-        {
-            if(kind_ == Kind::STRING)
-                destroy(&data_.str);
-        }
-    };
-
-    /**
-     * @fn operator=
-     * @brief コピーメソッド
-     * 
-     * @param DataFrame  
-     */
     void operator=(const DataFrame& other)
     {
-        header_ = other.header_;
-        data_   = other.data_;
+        rows_    = other.rows_;
+        cols_    = other.cols_;
+        header_  = other.header_;
+        data_    = other.data_;
     }
 
-    /**
-     * @fn read_csv
-     * @brief CSV読取メソッド (Factory Method)
-     * 
-     * @param std::string file_path csvのファイルパス
-     * @param 
-     * @return DataFrame 読取後DataFrameインスタンス
-     */
-    static DataFrame read_csv(const std::string& file_path, const std::unordered_map<ReadCsvArgument, DynamicType>& arg_map)
+    static DataFrame read_csv(const std::string& file_path, const bool& read_header=true, const std::string& separator = ",", const std::string& new_line = "\r\n", const bool& auto_trim = true)
     {
-        const auto header       = arg_map.count(HEADER)    ? arg_map.at(HEADER).as<bool>()           : true;
-        const auto separator    = arg_map.count(SEPARATOR) ? arg_map.at(SEPARATOR).as<std::string>()  : ",";
-        const auto new_line     = arg_map.count(NEW_LINE)  ? arg_map.at(NEW_LINE).as<std::string>()  : "\n";
-        const auto auto_trim    = arg_map.count(AUTO_TRIM) ? arg_map.at(AUTO_TRIM).as<bool>()        : true;
-        return read_csv(file_path, header, separator, new_line, auto_trim);
-    }
-
-    /**
-     * @fn read_csv
-     * @brief CSV読取メソッド (Factory Method)
-     * 
-     * @param std::string file_path csvのファイルパス
-     * @param 
-     * @return DataFrame 読取後DataFrameインスタンス
-     */
-#ifdef __unix__
-    static DataFrame read_csv(const std::string& file_path, const bool& header=true, const std::string& separator = ",", const std::string& new_line =   "\n", const bool& auto_trim = true)
-#else
-    static DataFrame read_csv(const std::string& file_path, const bool& header=true, const std::string& separator = ",", const std::string& new_line = "\r\n", const bool& auto_trim = true)
-#endif
-    {
-        std::vector<std::string> header_row;
-        std::vector<std::vector<std::string>> data;
+        auto header     = std::make_shared<std::vector<std::string>>();
+        auto data       = std::make_shared<std::vector<std::vector<std::string>>>();
 
         std::ifstream ifs(file_path, std::ios_base::binary);
         if(!ifs)
@@ -213,376 +56,728 @@ public:
             line_list.pop_back();
 
         // switching header on/off.
-        if(header)
+        if(read_header)
         {
-            header_row = split(line_list.front(), separator, auto_trim);
+            *header = split(line_list.front(), separator, auto_trim);
             line_list.erase(line_list.begin());
         }
         else
         {
             for(auto i=0; i < split(line_list.front(), separator, auto_trim).size();i++) 
-                header_row.push_back(std::to_string(i));
+                header->push_back(std::to_string(i));
         }
 
         int row_index = 0;
-        data.reserve(line_list.size());
-        for(auto&& line : line_list)
+        data->reserve(line_list.size());
+        for(const auto& line : line_list)
         {
-            auto row = split(line, separator, auto_trim);
-            if(row.size() != header_row.size())
+            const auto row = split(line, separator, auto_trim);
+            if(row.size() != header->size())
             {
                 std::stringstream ss;
-                ss  << "line[" << row_index + static_cast<int>(header) << "] element size between header and row is different."
-                    << "header's element size : " << header_row.size() << "row's element size : " << row.size();  
+                ss  << "line[" << row_index << "] element size between header and row is different."
+                    << "header's element size : " << header->size() << "row's element size : " << row.size();  
                 throw std::runtime_error(ss.str());
             }
-            data.push_back(row);
+            data->push_back(row);
             row_index++;
         }
 
-        return DataFrame(header_row, std::move(data));
+        auto rows = std::vector<size_t>(line_list.size());
+        std::iota(rows.begin(), rows.end(), 0);
+
+        auto cols = std::vector<size_t>(header->size());
+        std::iota(cols.begin(), cols.end(), 0);
+
+        return DataFrame{rows, cols, header, data};
     }
 
-    /**
-     * @fn to_csv
-     * @brief csvファイルへの書込メソッド
-     * 
-     * @param std::stirng file_path 書込先ファイルパス 
-     * @param append 追記モードか、上書きモードか
-     * @param header ヘッダーを出力データに含めるか
-     * @param separator 区切り文字
-     */
-    void to_csv(const std::string& file_path, const bool& append=false, const bool& header=true, const std::string& separator=",") const
+    DataFrame& filter(const std::function<bool(const DataFrame& row)>& func)
     {
-        std::ofstream ofs;
-        append ? ofs.open(file_path, std::ios::app) : ofs.open(file_path); // switching append or overwrite.
-        if(!ofs) 
-            throw std::runtime_error("file path '" + file_path + "' doesn't exist.");
-
-        if(header)
-            ofs << concat(header_, separator) << std::endl;
-        
-        std::stringstream ss;
-        for (const auto& row : data_)
-            ss << concat(row, separator) << std::endl;
-        
-        auto result = ss.str();
-        
-        result.pop_back(); // pop back latest new line
-        ofs << result;
-    }
-
-
-    /**
-     * @fn operator[]
-     * @brief 列名によるDataFrameの切出メソッド
-     * 
-     * @param std::stirng target_column 取得対象の列名
-     * @return DataFrame 切出処理後の新たなDataFrameインスタンス
-     */
-    DataFrame operator[](const std::string& target_column) const
-    {
-        auto itr = std::find(header_.begin(), header_.end(), target_column);
-        
-        if (itr==header_.end())
+        auto rows = std::vector<size_t>();
+        for (const auto& row : rows_)
         {
-            std::stringstream ss;
-            ss << "target column '" << target_column << "' was not found.";
-            throw std::runtime_error(ss.str());
+            if (func(DataFrame{std::vector<size_t>{row}, cols_, header_, data_}))
+            {
+                rows.push_back(row);
+            }
         }
-
-        int index = std::distance(header_.begin(), itr);
-        std::vector<std::string> header = {header_.at(index)};
-        std::vector<std::vector<std::string>> data;
-
-        for(const auto& row : data_)
-            data.push_back({row.at(index)});
-
-        return DataFrame(header, std::move(data));
-    }
-
-    /**
-     * @fn operator[]
-     * @brief 列名によるDataFrameの切出メソッド
-     * 
-     * @param std::stirng target_column 取得対象の列名
-     * @return DataFrame 切出処理後の新たなDataFrameインスタンス
-     */
-    DataFrame operator[](const char* target_column) const
-    {
-        return this->operator[](std::string(target_column));
-    }
-
-    /**
-     * @fn operator[]
-     * @brief 列名によるDataFrameの切出メソッド
-     * 
-     * @param std::vector<std::stirng> target_column_list 取得対象の列名のリスト
-     * @return DataFrame 切出処理後の新たなDataFrameインスタンス
-     */
-    DataFrame operator[](const std::vector<std::string>& target_column_list) const
-    {
-        std::vector<int> indices;
-        for (const auto& column : target_column_list)
-        {
-            auto itr = std::find(header_.begin(), header_.end(), column);
-            if (itr==header_.end())
-                throw std::runtime_error("target column was not found.");
-            int index = std::distance(header_.begin(), itr);
-            indices.push_back(index);
-        }
-
-        std::vector<std::string> header;
-        for(const auto& index : indices)
-            header.push_back(header_[index]);
-
-        std::vector<std::string> row_data;
-        std::vector<std::vector<std::string>> data;
-        for(const auto& row : data_)
-        {
-            row_data.clear();
-            for(const auto& index : indices)
-                row_data.push_back(row[index]);
-            data.push_back(row_data);
-        }
-
-        return DataFrame(header, std::move(data));
-    }
-
-    /**
-     * @fn operator[]
-     * @brief 行インデックスによるDataFrameの切出メソッド
-     * 
-     * @param std::stirng target_row 取得対象の行インデックス
-     * @return DataFrame 切出処理後の新たなDataFrameインスタンス
-     * @note 負数を指定した場合の取得対象行のインデックスはpandasの仕様に従う。
-     * @n    --例--  df[-1] == df[0] ... true
-     */
-    DataFrame operator[](const int& target_row) const
-    {
-        int index;
-        index = target_row >= 0 ? target_row : data_.size() + target_row;
-        if (index < 0 || index >= data_.size())
-            throw std::out_of_range("index number [" + std::to_string(target_row) + "] was out of range");
-
-        return DataFrame(header_, {data_[index]});
-    }
-
-    /**
-     * @fn slice
-     * @brief 行インデックスの開始・終了指定によるDataFrameの切出メソッド
-     * 
-     * @param int start_index 開始インデックス
-     * @param int end_index   終了インデックス 
-     * @return DataFrame 切出処理後の新たなDataFrameインスタンス
-     */
-    DataFrame slice(const int& start_index, const int& end_index) const
-    {
-        const int s_index = (start_index  >= 0) ? start_index  : data_.size() + start_index;
-        const int e_index = (end_index    >= 0) ? end_index    : data_.size() + end_index;
-        if (s_index < 0 || s_index >= data_.size())
-            throw std::out_of_range("start index number was out of range");
-        if (e_index   < 0 || e_index   >= data_.size())
-            throw std::out_of_range("end index number was out of range");
-        if (s_index > e_index)
-            throw std::out_of_range("end index must be larger than start index.");
-        
-        std::vector<std::vector<std::string>> data;
-        for(auto i = s_index; i < e_index; i++)
-            data.push_back(data_[i]);
-
-        return DataFrame(header_, std::move(data));
-    }
-
-    /**
-     * @fn rename
-     * @brief 列名のリネームメソッド
-     * 
-     * @param std::initializer_list<std::stirng> header リネーム後のヘッダー名のリスト 
-     * @return DataFrame& リネーム後の自身のインスタンス
-     */
-    DataFrame& rename(const std::initializer_list<std::string>& header)
-    {
-        std::vector<std::string> v(header);
-        this->rename(v);
+        rows_ = rows;
         return *this;
     }
 
-    /**
-     * @fn rename
-     * @brief 列名のリネームメソッド
-     * 
-     * @param std::vector<std::stirng> header リネーム後のヘッダー名のリスト 
-     * @return DataFrame& リネーム後の自身のインスタンス
-     */
-    DataFrame& rename(const std::vector<std::string> header)
+    DataFrame& sort_by(const char* col_name, const bool& ascending = true)
     {
-        if(header.size()!=header_.size())
+        const auto it = std::find_if(cols_.begin(), cols_.end(), [&](const std::size_t& col) { return col_name == (*header_)[col]; });
+        if (it == cols_.end())
+            throw std::out_of_range("column name '" + std::string(col_name) + "' is not found.");       
+    
+        std::sort(rows_.begin(), rows_.end(), [&](const std::size_t& lhs, const std::size_t& rhs) {
+            return (ascending ? (*data_)[lhs][*it] < (*data_)[rhs][*it] : (*data_)[lhs][*it] > (*data_)[rhs][*it]);
+        });
+
+        return *this;
+    }
+
+    bool to_csv(const std::string& file_path, const std::string& separator = ",", const std::string& new_line = "\r\n") const
+    {
+        auto ofs    = std::ofstream(file_path, std::ios_base::binary);
+        
+        if(!ofs)    
+            return false;
+
+        auto line = std::string();
+        for (const auto& col : cols_)
+        {
+            line += header_->operator[](col) + separator;
+        }
+        ofs << line.substr(0, line.size() - separator.size());
+
+        for (const auto& row : rows_)
+        {
+            line = new_line;
+            for (const auto& col : cols_)
+            {
+                line += (*data_)[row][col] + separator;
+            }
+            ofs << line.substr(0, line.size() - separator.size());
+        }
+
+        return true;
+    }
+
+    std::vector<DataFrame> rows()
+    {
+        auto ret = std::vector<DataFrame>();
+        for (const auto& row : rows_)
+        {
+            ret.push_back(DataFrame{std::vector<std::size_t>{row}, cols_, header_, data_});
+        }
+        return ret;
+    }
+
+    std::vector<DataFrame> reverse_rows()
+    {
+        auto ret    = std::vector<DataFrame>();
+        auto rows   = rows_;
+        std::reverse(rows.begin(), rows.end());
+        for (const auto& row : rows)
+        {
+            ret.push_back(DataFrame{std::vector<std::size_t>{row}, cols_, header_, data_});
+        }
+        return ret;
+    }
+
+    std::vector<DataFrame> cols()
+    {
+        auto ret = std::vector<DataFrame>();
+        for (const auto& col : cols_)
+        {
+            ret.push_back(DataFrame{rows_, std::vector<std::size_t>{col}, header_, data_ });
+        }
+        return ret;
+    }
+
+    std::vector<DataFrame> reverse_cols()
+    {
+        auto ret    = std::vector<DataFrame>();
+        auto cols   = cols_;
+        std::reverse(cols.begin(), cols.end());
+        for (const auto& col : cols)
+        {
+            ret.push_back(DataFrame{rows_, std::vector<std::size_t>{col}, header_, data_ });
+        }
+        return ret;
+    }
+
+    std::size_t row_size() const
+    {
+        return rows_.size();
+    }
+
+    std::size_t col_size() const
+    {
+        return cols_.size();
+    }
+
+    std::vector<std::string> header() const
+    {
+        auto ret = std::vector<std::string>();
+        for (const auto& col : cols_)
+        {
+            ret.push_back(header_->operator[](col));
+        }
+        return ret;
+    }
+
+    DataFrame copy() const
+    {
+        auto header = std::make_shared<std::vector<std::string>>();
+        auto data   = std::make_shared<std::vector<std::vector<std::string>>>();
+        *header     = *header_;
+        *data       = *data_;
+        return DataFrame{rows_, cols_, header, data};
+    }
+
+    DataFrame operator[](const char* col_name) const
+    {
+        auto it = std::find_if(cols_.begin(), cols_.end(), [&](const std::size_t& col) { return col_name == (*header_)[col]; });
+        if (it == cols_.end())
+            throw std::out_of_range("column name '" + std::string(col_name) + "' is not found.");
+        return DataFrame{rows_, std::vector<size_t>{*it}, header_, data_};
+    }
+
+    DataFrame operator[](const std::vector<const char*>& col_names) const
+    {
+        auto cols = std::vector<size_t>();
+        for (const  auto& col_name : col_names)
+        {
+            auto it = std::find_if(cols_.begin(), cols_.end(), [&](const std::size_t& col) { return col_name == (*header_)[col]; });
+            if (it == cols_.end())
+                throw std::out_of_range("column name '" + std::string(col_name) + "' is not found.");
+            cols.push_back(std::distance(cols_.begin(), it));
+        }
+        return DataFrame{rows_, cols, header_, data_};
+    }
+
+    DataFrame operator[](const int& row_index) const
+    {
+        const auto index = (row_index >= 0) ? row_index : rows_.size() + row_index;
+        if (index < 0 || index >= rows_.size())
+            throw std::out_of_range("row index number was out of range");
+        return DataFrame{std::vector<size_t>{rows_[index]}, cols_, header_, data_};
+    }
+
+    DataFrame operator[](const std::vector<int>& row_indices) const
+    {
+        auto rows = std::vector<size_t>();
+        for (const auto& row_index : row_indices)
+        {
+            const auto index = (row_index >= 0) ? row_index : rows_.size() + row_index;
+            if (index < 0 || index >= rows_.size())
+                throw std::out_of_range("row index number was out of range");
+            rows.push_back(rows_[index]);
+        }
+        return DataFrame{rows, cols_, header_, data_};
+    }
+
+    DataFrame operator[](const std::tuple<const char*, int>& access) const
+    {
+        return (*this)[std::get<0>(access)][std::get<1>(access)];
+    }
+
+    DataFrame operator[](const std::tuple<std::vector<const char*>, std::vector<int>>& access) const
+    {
+        return (*this)[std::get<0>(access)][std::get<1>(access)];
+    }
+
+    DataFrame& rename_header(const char* from, const char* to)
+    {
+        auto it = std::find_if(cols_.begin(), cols_.end(), [&](const std::size_t& col) { return from == header_->operator[](col); });
+        if (it == cols_.end())
+            throw std::out_of_range("column name '" + std::string(from) + "' is not found.");
+        header_->operator[](*it) = to;
+        return *this;
+    }
+
+    DataFrame& rename_header(const std::vector<const char*>& header)
+    {
+        if (header.size() != cols_.size())
             throw std::runtime_error("header size is different");
-        header_ = header;
+
+        for (size_t i = 0; i < header.size(); i++)
+        {
+            header_->operator[](cols_[i]) = header[i];
+        }
+
         return *this;
     }
 
-    /**
-     * @fn describe
-     * @brief メタ情報取得表示メソッド
-     */ 
+    DataFrame& rename_header(const std::vector<std::tuple<const char*, const char*>>& header)
+    {
+        for (const auto& key_value : header)
+        {
+            rename_header(std::get<0>(key_value), std::get<1>(key_value));
+        }
+        return *this;
+    }
+
     void describe() const
     {
-        std::cout << "header names: {" << concat(header_, ",") << "}" << std::endl;
-        std::cout << "    row size: " << data_.size() << std::endl;
-        std::cout << " column size: " << header_.size() << std::endl;
-    }
-
-    /**
-     * @fn data
-     * @brief データ取り出しメソッド
-     *  
-     * @return std::vector<std::vector<std::string> data 
-     */
-    std::vector<std::vector<std::string>> data() const
-    {
-        return data_;
-    }
-
-    /**
-     * @fn to_matrix
-     * @brief 2次元ベクターに変換するメソッド
-     * 
-     * @tparam T 
-     * @return std::vector<T> 
-     */
-    template<typename T>
-    std::vector<std::vector<T>> to_matrix() const
-    {
-        std::vector<std::vector<T>> result;
-        std::vector<T> tmp;
-        result.reserve(data_.size());
-        for(const auto& line : data_)
+        std::cout << "row size : " << rows_.size() << std::endl;
+        std::cout << "col size : " << cols_.size() << " [ ";
+        for (const auto& col : cols_)
         {
-            tmp.clear();
-            tmp.reserve(line.size());
-            for(const auto& e : line)
+            std::cout << "\"" << (*header_)[col] << "\" ";
+        }
+        std::cout << "]" << std::endl;
+    }
+
+    template<typename T>
+    inline T as() const
+    {
+        auto ret = T();
+        as_impl(ret);
+        return ret;
+    }
+
+    template<typename T>
+    inline void operator=(const T& other)
+    {
+        assign(other);
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const DataFrame& df)
+    {
+        auto widths = std::vector<size_t>();
+        for (const auto& col : df.cols_)
+        {
+            auto width = (*df.header_)[col].size();
+            for (const auto& row : df.rows_)
             {
-                tmp.push_back(As<T>::as(e));
+                width = (width > (*df.data_)[row][col].size()) ? width : (*df.data_)[row][col].size();
             }
-            result.push_back(tmp);
+            widths.push_back(width);
         }
-        return result;
-    }
 
-    /**
-     * @fn to_vector
-     * @brief 列・行いずれかを指定の型の1次元ベクターに変換するメソッド
-     * 
-     * @tparam T 
-     * @param enum Axis axis ベクター化したい軸 { ROW : 行, COLUMN : 列 } 
-     * @return std::vector<T> 
-     */
-    template<typename T>
-    std::vector<T> to_vector(const enum Axis& axis=COLUMN) const
-    {
-        if(axis==ROW && data_.size() != 1)
-            throw std::runtime_error("to_vector method can be used to 1 raw DataFrame only.");
-        if(axis==COLUMN && header_.size() != 1)
-            throw std::runtime_error("to_vector method can be used to 1 column DataFrame only.");
-        
-        std::vector<T> result;
-        if(axis==COLUMN)
-            for(const auto& row : data_)
-                result.push_back(As<T>::as(row[0]));
-        else // ROW
-            for(const auto& e : data_[0])
-                result.push_back(As<T>::as(e));
-        return result;
-    } 
-
-    /**
-     * @fn as
-     * @brief 1行・1列のDataFrameインスタンスを特定の型に変換する
-     * 
-     * @tparam T 
-     * @return T 取得したい型に変換したデータ返却する
-     */
-    template<typename T>
-    T as() const
-    {
-        if(data_.size() != 1 || data_.at(0).size() != 1)
+        auto line = std::string();
+        for (auto i= 0; i < df.cols_.size(); i++)
         {
-            throw std::runtime_error("as method can be used to 1 raw and 1 column DataFrame only.");
+            line += "| " + (*df.header_)[df.cols_[i]] + std::string(widths[i] - (*df.header_)[df.cols_[i]].size(), ' ') + " ";
+        }
+        line += "|";
+        os << line << std::endl;
+        os << std::string(line.size(), '-');
+
+        for (const auto& row : df.rows_)
+        {
+            std::cout << std::endl;
+            line.clear();
+            for (auto i= 0; i < df.cols_.size(); i++)
+            {
+                line += "| " + (*df.data_)[row][df.cols_[i]] + std::string(widths[i] - (*df.data_)[row][df.cols_[i]].size(), ' ') + " ";
+            }
+            line += "|";
+            os << line;
         }
 
-        return As<T>::as(data_[0][0]);
-    }
-
-    operator int() const
-    {
-        return as<int>();
-    }
-
-    operator double() const
-    {
-        return as<double>();
-    }
-
-    operator std::string() const
-    {
-        return as<std::string>();
-    }
-
-    operator std::vector<int>() const
-    {
-        if(data_.size() == 1)
-            return to_vector<int>(ROW);
-        else
-            return to_vector<int>(COLUMN);
-    }
-
-    operator std::vector<double>() const
-    {
-        if(data_.size() == 1)
-            return to_vector<double>(ROW);
-        else
-            return to_vector<double>(COLUMN);
-    }
-
-    operator std::vector<std::string>() const
-    {
-        if(data_.size() == 1)
-            return to_vector<std::string>(ROW);
-        else
-            return to_vector<std::string>(COLUMN);
-    }
-
-    operator std::vector<std::vector<int>>() const
-    {
-        return to_matrix<int>();
-    }
-
-    operator std::vector<std::vector<double>>() const
-    {
-        return to_matrix<double>();
-    }
-
-    operator std::vector<std::vector<std::string>>() const
-    {
-        return to_matrix<std::string>();
+        return os;
     }
 
 private:
-    std::vector<std::string>  header_;
-    std::vector<std::vector<std::string>> data_;
 
-    static std::string concat(const std::vector<std::string>& origin, const std::string& separator)
+    std::vector<std::size_t>     rows_;
+    std::vector<std::size_t>     cols_;
+
+    std::shared_ptr<std::vector<std::string>>   header_;
+    std::shared_ptr<std::vector<std::vector<std::string>>>   data_;
+
+    DataFrame(
+        const std::vector<size_t>& rows,
+        const std::vector<size_t>& cols,
+        const std::shared_ptr<std::vector<std::string>>& header, 
+        const std::shared_ptr<std::vector<std::vector<std::string>>>& data
+    )   : rows_(rows)
+        , cols_(cols)
+        , header_(header)
+        , data_(data)
+    {}
+
+    void as_impl(bool& ret) const
     {
-        std::string result;
-        for (const auto& str : origin)
-            result += str + separator;
+        if (rows_.size() != 1 || cols_.size() != 1)
+            throw std::runtime_error("as() failed. data size is not 1");
+
+        const auto& str = (*data_)[rows_[0]][cols_[0]];
         
-        auto separator_size = separator.size();
-        while(separator_size--)
-            result.pop_back();
-        return result;
+        if (str == "true" || str == "True" || str == "TRUE" || str == "1")
+            ret = true;
+        else if (str == "false" || str == "False" || str == "FALSE" || str == "0")
+            ret = false;
+        else
+            throw std::runtime_error("as() failed. '" + str + "' could not cast to bool");
+    }
+
+    void as_impl(int& ret) const
+    {
+        if (rows_.size() != 1 || cols_.size() != 1)
+            throw std::runtime_error("as() failed. data size is not 1");
+
+        const auto& str = (*data_)[rows_[0]][cols_[0]];
+        char* endptr    = nullptr;
+        ret             = std::strtol(str.c_str(), &endptr, 10);
+
+        if (endptr == str.c_str())
+            throw std::runtime_error("as() failed. '" + str + "' could not cast to int");
+    }
+
+    void as_impl(double& ret) const
+    {
+        if (rows_.size() != 1 || cols_.size() != 1)
+            throw std::runtime_error("as() failed. data size is not 1");
+
+        const auto& str = (*data_)[rows_[0]][cols_[0]];
+        char* endptr    = nullptr;
+        ret             = std::strtod(str.c_str(), &endptr);
+        if (endptr == str.c_str())
+            throw std::runtime_error("as() failed. '" + str + "' could not cast to double");
+    }
+
+    void as_impl(std::string& ret) const
+    {
+        if (rows_.size() != 1 || cols_.size() != 1)
+            throw std::runtime_error("as() failed. data size is not 1");
+
+        ret = (*data_)[rows_[0]][cols_[0]];
+    }
+
+    void as_impl(std::vector<bool>& ret) const
+    {
+        if (!(rows_.size() == 1 || cols_.size() == 1))
+            throw std::runtime_error("as() failed. data size is not 1");
+
+        if (rows_.size() == 1)
+        {
+            for (const auto& col : cols_)
+            {
+                const auto& str = (*data_)[rows_[0]][col];
+                if (str == "true" || str == "True" || str == "TRUE" || str == "1")
+                    ret.push_back(true);
+                else if (str == "false" || str == "False" || str == "FALSE" || str == "0")
+                    ret.push_back(false);
+                else
+                    throw std::runtime_error("as() failed. '" + str + "' could not cast to bool");
+            }
+        }
+        else if (cols_.size() == 1)
+        {
+            for (const auto& row : rows_)
+            {
+                const auto& str = (*data_)[row][cols_[0]];
+                if (str == "true" || str == "True" || str == "TRUE" || str == "1")
+                    ret.push_back(true);
+                else if (str == "false" || str == "False" || str == "FALSE" || str == "0")
+                    ret.push_back(false);
+                else
+                    throw std::runtime_error("as() failed. '" + str + "' could not cast to bool");
+            }
+        }
+    }
+
+    void as_impl(std::vector<int>& ret) const
+    {
+        if (!(rows_.size() == 1 || cols_.size() == 1))
+            throw std::runtime_error("as() failed. data size is not 1");
+
+        if (rows_.size() == 1)
+        {
+            for (const auto& col : cols_)
+            {
+                const auto& str = (*data_)[rows_[0]][col];
+                char* endptr    = nullptr;
+                int r           = std::strtol(str.c_str(), &endptr, 10);
+                if (endptr == str.c_str())
+                    throw std::runtime_error("as() failed. '" + str + "' could not cast to int");
+                ret.push_back(r);
+            }
+        }
+        else if (cols_.size() == 1)
+        {
+            for (const auto& row : rows_)
+            {
+                const auto& str = (*data_)[row][cols_[0]];
+                char* endptr    = nullptr;
+                int r           = std::strtol(str.c_str(), &endptr, 10);
+                if (endptr == str.c_str())
+                    throw std::runtime_error("as() failed. '" + str + "' could not cast to int");
+                ret.push_back(r);
+            }
+        }
+    }
+
+    void as_impl(std::vector<double>& ret) const
+    {
+        if (!(rows_.size() == 1 || cols_.size() == 1))
+            throw std::runtime_error("as() failed. data size is not 1");
+
+        if (rows_.size() == 1)
+        {
+            for (const auto& col : cols_)
+            {
+                const auto& str = (*data_)[rows_[0]][col];
+                char* endptr    = nullptr;
+                double r        = std::strtod(str.c_str(), &endptr);
+                if (endptr == str.c_str())
+                    throw std::runtime_error("as() failed. '" + str + "' could not cast to double");
+                ret.push_back(r);
+            }
+            return;
+        }
+        else if (cols_.size() == 1)
+        {
+            for (const auto& row : rows_)
+            {
+                const auto& str = (*data_)[row][cols_[0]];
+                char* endptr    = nullptr;
+                double r        = std::strtod(str.c_str(), &endptr);
+                if (endptr == str.c_str())
+                    throw std::runtime_error("as() failed. '" + str + "' could not cast to double");
+                ret.push_back(r);
+            }
+            return;
+        }
+    }
+
+    void as_impl(std::vector<std::string>& ret) const
+    {
+        if (!(rows_.size() == 1 || cols_.size() == 1))
+            throw std::runtime_error("as() failed. data size is not 1");
+
+        if (rows_.size() == 1)
+        {
+            for (const auto& col : cols_)
+            {
+                ret.push_back((*data_)[rows_[0]][col]);
+            }
+        }
+        else if (cols_.size() == 1)
+        {
+            for (const auto& row : rows_)
+            {
+                ret.push_back((*data_)[row][cols_[0]]);
+            }
+        }
+    }
+
+    void as_impl(std::vector<std::vector<bool>>& ret) const
+    {
+        for (const auto& row : rows_)
+        {
+            ret.push_back(std::vector<bool>{});
+            for (const auto& col : cols_)
+            {
+                const auto& str = (*data_)[row][col];
+                if (str == "true" || str == "True" || str == "TRUE" || str == "1")
+                    ret.back().push_back(true);
+                else if (str == "false" || str == "False" || str == "FALSE" || str == "0")
+                    ret.back().push_back(false);
+                else
+                    throw std::runtime_error("as() failed. '" + str + "' could not cast to bool");
+            }
+        }
+    }
+
+    void as_impl(std::vector<std::vector<int>>& ret) const
+    {
+        for (const auto& row : rows_)
+        {
+            ret.push_back(std::vector<int>{});
+            for (const auto& col : cols_)
+            {
+                const auto& str = (*data_)[row][col];
+                char* endptr    = nullptr;
+                int r           = std::strtol(str.c_str(), &endptr, 10);
+                if (endptr == str.c_str())
+                    throw std::runtime_error("as() failed. '" + str + "' could not cast to int");
+                ret.back().push_back(r);
+            }
+        }
+    }
+
+    void as_impl(std::vector<std::vector<std::string>>& ret) const
+    {
+        for (const auto& row : rows_)
+        {
+            ret.push_back(std::vector<std::string>{});
+            for (const auto& col : cols_)
+            {
+                ret.back().push_back((*data_)[row][col]);
+            }
+        }
+    }
+
+    void assign(const bool& value)
+    {
+        if (rows_.size() != 1 && cols_.size() != 1)
+            throw std::runtime_error("operator=() failed. data size is not 1");
+
+        (*data_)[rows_[0]][cols_[0]] = value ? "true" : "false";
+    }
+
+    void assign(const int& value)
+    {
+        if (rows_.size() != 1 && cols_.size() != 1)
+            throw std::runtime_error("operator=() failed. data size is not 1");
+
+        (*data_)[rows_[0]][cols_[0]] = std::to_string(value);
+    }
+
+    void assign(const double& value)
+    {
+        if (rows_.size() != 1 && cols_.size() != 1)
+            throw std::runtime_error("operator=() failed. data size is not 1");
+
+        (*data_)[rows_[0]][cols_[0]] = std::to_string(value);
+    }
+
+    void assign(const char* value)
+    {
+        if (rows_.size() != 1 && cols_.size() != 1)
+            throw std::runtime_error("operator=() failed. data size is not 1");
+
+        (*data_)[rows_[0]][cols_[0]] = value;
+    }
+
+    void assign(const std::string& value)
+    {
+        if (rows_.size() != 1 && cols_.size() != 1)
+            throw std::runtime_error("operator=() failed. data size is not 1");
+        
+        (*data_)[rows_[0]][cols_[0]] = value;
+    }
+
+    void assign(const std::vector<bool>& value)
+    {
+        if (!((rows_.size() == 1 && cols_.size() == value.size()) || (rows_.size() == value.size() && cols_.size() == 1)))
+            throw std::runtime_error("operator=() failed. data size is not 1");
+
+        if (rows_.size() == 1 && cols_.size() == value.size())
+        {
+            for (std::size_t i = 0; i < value.size(); ++i)
+            {
+                (*data_)[rows_[0]][cols_[i]] = value[i] ? "true" : "false";
+            }
+        }
+        else
+        {
+            for (std::size_t i = 0; i < value.size(); ++i)
+            {
+                (*data_)[rows_[i]][cols_[0]] = value[i] ? "true" : "false";
+            }
+        }
+    }
+
+    void assign(const std::vector<int>& value)
+    {
+        if (!((rows_.size() == 1 && cols_.size() == value.size()) || (rows_.size() == value.size() && cols_.size() == 1)))
+            throw std::runtime_error("operator=() failed. data size is not 1");
+        
+        if (rows_.size() == 1 && cols_.size() == value.size())
+        {
+            for (auto i = 0; i < value.size(); ++i)
+            {
+                (*data_)[rows_[0]][cols_[i]] = std::to_string(value[i]);
+            }
+        }
+        else
+        {
+            for (auto i = 0; i < value.size(); ++i)
+            {
+                (*data_)[rows_[i]][cols_[0]] = std::to_string(value[i]);
+            }
+        }
+    }
+    
+    void assign(const std::vector<double>& value)
+    {
+        if (!((rows_.size() == 1 && cols_.size() == value.size()) || (rows_.size() == value.size() && cols_.size() == 1)))
+            throw std::runtime_error("operator=() failed. data size is not 1");
+
+        if (rows_.size() == 1 && cols_.size() == value.size())
+        {
+            for (auto i = 0; i < value.size(); ++i)
+            {
+                (*data_)[rows_[0]][cols_[i]] = std::to_string(value[i]);
+            }
+        }
+        else
+        {
+            for (auto i = 0; i < value.size(); ++i)
+            {
+                (*data_)[rows_[i]][cols_[0]] = std::to_string(value[i]);
+            }
+        }
+    }
+
+    void assign(const std::vector<std::vector<bool>>& value)
+    {
+        if (value.size() != rows_.size())
+            throw std::runtime_error("operator=() failed. data size not match");
+        
+        for (auto i = 0; i < value.size(); i++)
+        {
+            if (value[i].size() != cols_.size())
+                throw std::runtime_error("operator=() failed. data size not match");
+        }
+
+        for (auto i = 0; i < value.size(); ++i)
+        {
+            for (auto j = 0; j < value[i].size(); ++j)
+            {
+                (*data_)[rows_[i]][cols_[j]] = value[i][j] ? "true" : "false";
+            }
+        }
+    }
+
+    void assign(const std::vector<std::vector<int>>& value)
+    {
+        if (value.size() != rows_.size())
+            throw std::runtime_error("operator=() failed. data size not match");
+
+        for (auto i = 0; i < value.size(); i++)
+        {
+            if (value[i].size() != cols_.size())
+                throw std::runtime_error("operator=() failed. data size not match");
+        }
+
+        for (auto i = 0; i < value.size(); ++i)
+        {
+            for (auto j = 0; j < value[i].size(); ++j)
+            {
+                (*data_)[rows_[i]][cols_[j]] = std::to_string(value[i][j]);
+            }
+        }
+    }
+
+    void assign(const std::vector<std::vector<double>>& value)
+    {
+        if (value.size() != rows_.size())
+            throw std::runtime_error("operator=() failed. data size not match");
+
+        for (auto i = 0; i < value.size(); i++)
+        {
+            if (value[i].size() != cols_.size())
+                throw std::runtime_error("operator=() failed. data size not match");
+        }
+
+        for (auto i = 0; i < value.size(); ++i)
+        {
+            for (auto j = 0; j < value[i].size(); ++j)
+            {
+                (*data_)[rows_[i]][cols_[j]] = std::to_string(value[i][j]);
+            }
+        }
+    }
+
+    void assign(const std::vector<std::string>& value)
+    {
+        if (!((rows_.size() == 1 && cols_.size() == value.size()) || (rows_.size() == value.size() && cols_.size() == 1)))
+            throw std::runtime_error("operator=() failed. data size is not 1");
+
+        if (rows_.size() == 1 && cols_.size() == value.size())
+        {
+            for (auto i = 0; i < value.size(); ++i)
+            {
+                (*data_)[rows_[0]][cols_[i]] = value[i];
+            }
+        }
+        else
+        {
+            for (auto i = 0; i < value.size(); ++i)
+            {
+                (*data_)[rows_[i]][cols_[0]] = value[i];
+            }
+        }
     }
 
     static std::vector<std::string> split(const std::string& origin, const std::string& separator, const bool& auto_trim=false)
@@ -633,31 +828,6 @@ private:
         return result;
     }
 
-    template<class T, class = void> 
-    struct As 
-    {
-        static T as(const std::string& value) 
-        {
-            T result;
-            std::stringstream ss;
-            ss << value;        
-            ss >> result;
-            return result;
-        }
-    };
-
-    template<class V> 
-    struct As<std::string, V> 
-    {
-        static std::string as(const std::string& value) 
-        {
-            return value;
-        }
-    }; 
-
-    explicit DataFrame(const std::vector<std::string>& header, const std::vector<std::vector<std::string>>&& data)
-     : header_(header), data_(std::move(data))
-    {}
 };
 
 #endif
