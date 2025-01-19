@@ -31,14 +31,6 @@ class DataFrame final
 
 public:
 
-    void operator=(const DataFrame& other)
-    {
-        rows_    = other.rows_;
-        cols_    = other.cols_;
-        header_  = other.header_;
-        data_    = other.data_;
-    }
-
     static DataFrame read_csv(const std::string& file_path, const bool& read_header=true, const std::string& separator = ",", const std::string& new_line = "\r\n", const bool& auto_trim = true)
     {
         auto header     = std::make_shared<std::vector<std::string>>();
@@ -322,9 +314,9 @@ public:
     }
 
     template<typename T>
-    inline void operator=(const T& other)
+    void operator=(const T& value)
     {
-        assign(other);
+        assign(value);
     }
 
     friend std::ostream& operator<<(std::ostream& os, const DataFrame& df)
@@ -438,6 +430,7 @@ private:
 
         if (rows_.size() == 1)
         {
+            ret.reserve(cols_.size());
             for (const auto& col : cols_)
             {
                 const auto& str = (*data_)[rows_[0]][col];
@@ -449,8 +442,9 @@ private:
                     throw std::runtime_error("as() failed. '" + str + "' could not cast to bool");
             }
         }
-        else if (cols_.size() == 1)
+        else
         {
+            ret.reserve(rows_.size());
             for (const auto& row : rows_)
             {
                 const auto& str = (*data_)[row][cols_[0]];
@@ -471,6 +465,7 @@ private:
 
         if (rows_.size() == 1)
         {
+            ret.reserve(cols_.size());
             for (const auto& col : cols_)
             {
                 const auto& str = (*data_)[rows_[0]][col];
@@ -481,8 +476,9 @@ private:
                 ret.push_back(r);
             }
         }
-        else if (cols_.size() == 1)
+        else
         {
+            ret.reserve(rows_.size());
             for (const auto& row : rows_)
             {
                 const auto& str = (*data_)[row][cols_[0]];
@@ -511,10 +507,10 @@ private:
                     throw std::runtime_error("as() failed. '" + str + "' could not cast to double");
                 ret.push_back(r);
             }
-            return;
         }
-        else if (cols_.size() == 1)
+        else
         {
+            ret.reserve(rows_.size());
             for (const auto& row : rows_)
             {
                 const auto& str = (*data_)[row][cols_[0]];
@@ -524,7 +520,6 @@ private:
                     throw std::runtime_error("as() failed. '" + str + "' could not cast to double");
                 ret.push_back(r);
             }
-            return;
         }
     }
 
@@ -535,13 +530,15 @@ private:
 
         if (rows_.size() == 1)
         {
+            ret.reserve(cols_.size());
             for (const auto& col : cols_)
             {
                 ret.push_back((*data_)[rows_[0]][col]);
             }
         }
-        else if (cols_.size() == 1)
+        else
         {
+            ret.reserve(rows_.size());
             for (const auto& row : rows_)
             {
                 ret.push_back((*data_)[row][cols_[0]]);
@@ -551,9 +548,11 @@ private:
 
     void as_impl(std::vector<std::vector<bool>>& ret) const
     {
+        ret.reserve(rows_.size());
         for (const auto& row : rows_)
         {
             ret.push_back(std::vector<bool>{});
+            ret.back().reserve(cols_.size());
             for (const auto& col : cols_)
             {
                 const auto& str = (*data_)[row][col];
@@ -569,9 +568,11 @@ private:
 
     void as_impl(std::vector<std::vector<int>>& ret) const
     {
+        ret.reserve(rows_.size());
         for (const auto& row : rows_)
         {
             ret.push_back(std::vector<int>{});
+            ret.back().reserve(cols_.size());
             for (const auto& col : cols_)
             {
                 const auto& str = (*data_)[row][col];
@@ -584,11 +585,32 @@ private:
         }
     }
 
+    void as_impl(std::vector<std::vector<double>>& ret) const
+    {
+        ret.reserve(rows_.size());
+        for (const auto& row : rows_)
+        {
+            ret.push_back(std::vector<double>{});
+            ret.back().reserve(cols_.size());
+            for (const auto& col : cols_)
+            {
+                const auto& str = (*data_)[row][col];
+                char* endptr    = nullptr;
+                double r        = std::strtod(str.c_str(), &endptr);
+                if (endptr == str.c_str())
+                    throw std::runtime_error("as() failed. '" + str + "' could not cast to double");
+                ret.back().push_back(r);
+            }
+        }
+    }
+
     void as_impl(std::vector<std::vector<std::string>>& ret) const
     {
+        ret.reserve(rows_.size());
         for (const auto& row : rows_)
         {
             ret.push_back(std::vector<std::string>{});
+            ret.back().reserve(cols_.size());
             for (const auto& col : cols_)
             {
                 ret.back().push_back((*data_)[row][col]);

@@ -13,6 +13,9 @@ int main()
     std::cout << "original" << std::endl;
     std::cout << df << std::endl;
 
+    // copy
+    auto df2 = df.copy();
+
     // filter vegan and age > 30
     df.filter([](const DataFrame& row) { return row["vegan"].as<bool>() && row["age"].as<int>() > 30; });
     std::cout << std::endl;
@@ -38,6 +41,11 @@ int main()
     std::cout << std::endl;
     std::cout << "positional updated" << std::endl;
     std::cout << df << std::endl;
+
+    // check copy object
+    std::cout << std::endl;
+    std::cout << "original" << std::endl;
+    std::cout << df2 << std::endl;
 
     // save csv
     df.to_csv("data/output.csv");
